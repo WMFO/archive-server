@@ -23,5 +23,5 @@ Supports serving in .mp3 (128kbps CBR) and .flac through SoX. First checks for t
 Known Issues:
 
 * The script will hang in the event that the transcode process is killed by a crash because it waits for the .done file. It will hit the php timeout.
-* If a transcode is triggered in the final hour of a broadcast, the show is still being writtin
+* If a transcode is triggered in the final hour of a broadcast, the show is still being written. It will successfully complete the transcode but the file will be incomplete, missing less than 60 minutes of the broadcast. Fix scheduled for next version which involves checking the ratio of file size of input and output.
 * No provision for serving compressed files (when we squash down to HE-AAC v2 for indefinite storage)
