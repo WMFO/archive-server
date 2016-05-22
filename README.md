@@ -15,6 +15,13 @@ Requires two mounts
 
 ## Versions
 
+### 1.1 (5/22/2016)
+
+Fix the following issues:
+
+* Checks .mp3 files for incomplete transcode. Experimentally (total .s16 filesize)/(cache file size) should be at or slightly less than 12.
+* Script detects stale cache files (> 10 seconds since modification at script execution). Only tests if .done file not present.
+
 
 ### 1.0 (5/17/2016)
 

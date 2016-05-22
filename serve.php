@@ -17,7 +17,8 @@ function serve_incomplete($name) {
 	if (!$file) {
 		return(false);
 	}
-	
+	//feof can indicate that we're at the end of a file but it's still transcoding
+	//only the presence of both feof and the done file indicate completion of transfer
 	while (!feof($file) || !file_exists($name . ".done")) {
 		if (feof($file))
 			sleep(1);
@@ -35,7 +36,7 @@ function send_file_headers($format,$ts) {
 	header('Pragma: public');
 }
 
-function mp3_file_size($format,$ts,$length) {
+function mult_file_size($format,$ts,$length) {
 	$size = 0;
 	for ($i = 0; $i < $length ; $i++) {
 		$fn = strftime($format,$ts + $i*3600);
@@ -57,6 +58,17 @@ function generate_filenames($format,$ts,$length) {
 		$filenames .= " ./archives/" . $fn;
 	}
 	return($filenames);
+}
+
+function sanity_check($cache_file, $filesize_total, $format) {
+	$cache_size = filesize($cache_file);
+	$ratio = $filesize_total / $cache_size;
+	if ($format == "mp3") {
+		if ($ratio > 12.01) {
+			return false;
+		}
+	}
+	return true;	
 }
 
 if (!isset($_GET['date'])) {
@@ -83,7 +95,7 @@ if ($mp3filenames !== false) {
 	//concatenate MP3s
 	send_file_headers(".mp3",$ts);
 
-	header('Content-Length: ' . mp3_file_size("%Y-%m-%d-%H.mp3",$ts,$length));
+	header('Content-Length: ' . mult_file_size("%Y-%m-%d-%H.mp3",$ts,$length));
 	
 	passthru("/bin/cat $mp3filenames");
 	exit();
@@ -113,13 +125,32 @@ if ($mp3filenames !== false) {
 
 	//cache implementation
 	if (file_exists($cache_file . ".done")) {
-		header('Content-Length: ' . filesize($cache_file));
 		//I used this to support concatenating rather than a more complex file read job
-		passthru("/bin/cat $cache_file");
-		//TODO: support partial transfer requests? Or not...
-	} elseif (file_exists($cache_file)) {
+		$filesize = mult_file_size("%Y-%m-%d_%H.s16",$ts,$length);
+		if (sanity_check($cache_file,$filesize,$format)) {
+			header('Content-Length: ' . filesize($cache_file));
+			passthru("/bin/cat $cache_file");
+			//TODO: support partial transfer requests? Or not...
+			exit();
+		} else { 
+			//transcode too small, purge cache
+			unlink($cache_file);
+			unlink($cache_file . ".done");
+		}
+	} 
+	if (file_exists($cache_file)) {
 		//conversion is in progress
-		serve_incomplete($cache_file);
+		if ((time() - filemtime($cache_file)) > 10) {
+			//stale cache file (probably transcode interrupted)
+			//experimentally this should never exceed 0 on an active transcode
+			error_log($cache_file . " determined to be stale (> 120 secs, no .done file). Caused by crash or bug.");
+			unlink($cache_file);
+			unlink($cache_file . ".done");
+		} else {
+			serve_incomplete($cache_file);
+			exit();
+		}
+			
 	} else {
 		//start new conversion
 		//This was really annoying to get to happen async. Not sure why. This appears to work
