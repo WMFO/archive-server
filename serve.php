@@ -4,7 +4,7 @@ global $formats;
 function usage($m) {
 	http_response_code(400);
 	echo "<h1>Error 400 - Bad Request</h1>";
-	echo "<p>WMFO's multi-format on-the-fly archive serving and transcoding script, writeen by Nick Andre 5/17/2016.</p><p>Usage:</p><pre>http://";
+	echo "<p>WMFO's multi-format on-the-fly archive serving and transcoding script, written by Nick Andre Sumer of 2016.</p><p>Usage:</p><pre>http://";
 	echo $_SERVER['SERVER_NAME'] . "/serve.php?date=YYYY-MM-DDTHH:MM:SS&length=HOURS&format=FORMAT</pre>";
 	echo "<p>Available formats:</p><pre>";
 	var_dump($GLOBALS['formats']);
@@ -150,19 +150,17 @@ if ($mp3filenames !== false) {
 			serve_incomplete($cache_file);
 			exit();
 		}
-			
-	} else {
-		//start new conversion
-		//This was really annoying to get to happen async. Not sure why. This appears to work
-		// (I haven't yet tried killing apache to see if it stops the conversion but that's supposedly
-		// what setsid should help with).
-		exec("setsid ./convert.sh \"$filenames\" $format $cache_file >/dev/null 2>/dev/null &");
-		
-		//wait for file to exist. If it doesn't exist next step fails
-		while(!file_exists($cache_file))
-			usleep(50);
-
-		//serve conversion as it rolls out
-		serve_incomplete($cache_file);
 	}
+	//start new conversion
+	//This was really annoying to get to happen async. Not sure why. This appears to work
+	// (I haven't yet tried killing apache to see if it stops the conversion but that's supposedly
+	// what setsid should help with).
+	exec("setsid ./convert.sh \"$filenames\" $format $cache_file >/dev/null 2>/dev/null &");
+	
+	//wait for file to exist. If it doesn't exist next step fails
+	while(!file_exists($cache_file))
+		usleep(50);
+
+	//serve conversion as it rolls out
+	serve_incomplete($cache_file);
 }

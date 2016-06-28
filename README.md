@@ -15,6 +15,10 @@ Requires two mounts
 
 ## Versions
 
+### 1.2 (6/28/2016)
+
+Correct logic for error recovery
+
 ### 1.1 (5/22/2016)
 
 Fix the following issues:
