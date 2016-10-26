@@ -4,7 +4,7 @@ global $formats;
 function usage($m) {
 	http_response_code(400);
 	echo "<h1>Error 400 - Bad Request</h1>";
-	echo "<p>WMFO's multi-format on-the-fly archive serving and transcoding script, written by Nick Andre Sumer of 2016.</p><p>Usage:</p><pre>http://";
+	echo "<p>WMFO's multi-format on-the-fly archive serving and transcoding script, written by Nick Andre in Summer of 2016.</p><p>Usage:</p><pre>http://";
 	echo $_SERVER['SERVER_NAME'] . "/serve.php?date=YYYY-MM-DDTHH:MM:SS&length=HOURS&format=FORMAT</pre>";
 	echo "<p>Available formats:</p><pre>";
 	var_dump($GLOBALS['formats']);
@@ -71,11 +71,16 @@ function sanity_check($cache_file, $filesize_total, $format) {
 	return true;	
 }
 
+function estimate_content_length($filesize_total, $format) {
+	if ($format == "mp3") {
+		return $filesize_total / 12 + 384;
+	}
+	return false;
+}
+
 if (!isset($_GET['date'])) {
 	usage("please specify a date parameter");
 }
-
-
 
 $date = $_GET['date'];
 $length = isset($_GET['length']) ? $_GET['length'] : 1;
@@ -123,10 +128,13 @@ if ($mp3filenames !== false) {
 
 	send_file_headers($format,$ts);
 
+	$filesize = mult_file_size("%Y-%m-%d_%H.s16",$ts,$length);
+	$estimatedFilesize = estimate_content_length($filesize,$format);
+	//die(var_dump($estimatedFilesize));
+
 	//cache implementation
 	if (file_exists($cache_file . ".done")) {
 		//I used this to support concatenating rather than a more complex file read job
-		$filesize = mult_file_size("%Y-%m-%d_%H.s16",$ts,$length);
 		if (sanity_check($cache_file,$filesize,$format)) {
 			header('Content-Length: ' . filesize($cache_file));
 			passthru("/bin/cat $cache_file");
@@ -147,6 +155,9 @@ if ($mp3filenames !== false) {
 			unlink($cache_file);
 			unlink($cache_file . ".done");
 		} else {
+			if ($estimatedFilesize) {
+				header('Content-Length: ' . $estimatedFilesize);
+			}
 			serve_incomplete($cache_file);
 			exit();
 		}
@@ -162,5 +173,8 @@ if ($mp3filenames !== false) {
 		usleep(50);
 
 	//serve conversion as it rolls out
+	if ($estimatedFilesize) {
+		header('Content-Length: ' . $estimatedFilesize);
+	}
 	serve_incomplete($cache_file);
 }
