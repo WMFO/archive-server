@@ -15,6 +15,14 @@ Requires two mounts
 
 ## Versions
 
+### 1.3 (3/16/2017)
+
+Archive server will error out and provide a status message while a FLAC file is transcoding. Downloads before transcode was complete had a botched checksum and were unplayable on many devices.
+
+Added support for partial file transcodes. Caveats/todo: this behavior doesn't work before the transcode is complete so scrolling won't work the first time any human browses to the particular archive link. We can fix this by implementing a separate partial file support while the transcode is in process (currently it will just respond with 200 and again send the file which will confuse poor HTML5 audio element). Basically, before the transcode completes the app gives an "estimated" file size and then sends the data if it's available. That means someone could scroll ahead to a point that hasn't been transcoded, at which point we will have to either stall until the transcode "catches up" to that point or terminate the connection. We'll also need reasonable error handling. Anyways I figured that scrolling most of the time was better than "broken" so I've gone ahead and deployed it.
+
+In addition, the "correct" way of doing this (at least in the post-transcode code paths) would be to use the mod_sendfile. That's probably low priority assuming that this server rarely gets loaded too significantly.
+
 ### 1.2 (6/28/2016)
 
 Correct logic for error recovery
