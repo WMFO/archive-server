@@ -15,6 +15,12 @@ Requires two mounts
 
 ## Versions
 
+### 1.4 (3/16/2017)
+
+Full support for partial files.
+
+Todo: reimplement "stale file" logic to actually check for presence of transcode process. File modify time keeps breaking for unknown reason even with the php cache purging. Extended file modification thresholds in the interim.
+
 ### 1.3 (3/16/2017)
 
 Archive server will error out and provide a status message while a FLAC file is transcoding. Downloads before transcode was complete had a botched checksum and were unplayable on many devices.
