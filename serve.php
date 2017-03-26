@@ -181,7 +181,7 @@ if (file_exists($cache_file . ".done")) {
     // e.g. if someone tried to download the archive mid way through a show, the result would be shorter
     if (sanity_check($cache_file,$originalFilesize,$format)) {
 
-        serve_file(false,$cache_file,$ts);
+        serve_file(false,$cache_file,$format,$ts);
         exit();
     }
     //transcode too small, purge cache
