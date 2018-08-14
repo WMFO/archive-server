@@ -98,7 +98,11 @@ function serve_file($transcodeIncomplete = false, $cache_file, $format, $dt_est,
 }
 
 function send_file_headers($format,$dt_est,$partial) {
-    $type = $format;
+    if ($format == "mp3") {
+        $type = "mpeg";
+    } else {
+        $type = $format;
+    }
     if ($partial) {
         http_response_code(206);
         header("Content-Type: audio/$type");
