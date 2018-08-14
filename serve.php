@@ -43,7 +43,7 @@ function serve_partial($filename, $offset, $filesize) {
     return(true);
 }
 
-function serve_file($transcodeIncomplete = false, $cache_file, $format, $ts, $estimatedFilesize) {
+function serve_file($transcodeIncomplete = false, $cache_file, $format, $dt_est, $estimatedFilesize) {
     $measuredFilesize = filesize($cache_file);
     $offset = 0;
     if (isset($_SERVER['HTTP_RANGE'])) {
@@ -56,7 +56,7 @@ function serve_file($transcodeIncomplete = false, $cache_file, $format, $ts, $es
 
     if ($offset == 0) {
         //whole file
-        send_file_headers($format, $ts, false);
+        send_file_headers($format, $dt_est, false);
 
         if ($_SERVER['REQUEST_METHOD'] != 'HEAD') {
             if ($transcodeIncomplete) {
@@ -74,7 +74,7 @@ function serve_file($transcodeIncomplete = false, $cache_file, $format, $ts, $es
         //partial file
         $filesize = $transcodeIncomplete ? $estimatedFilesize : $measuredFilesize;
         $netSize = $filesize - $offset;
-        send_file_headers($format, $ts, true);
+        send_file_headers($format, $dt_est, true);
         header('Content-Length: ' . $netSize);
         header("Content-Range: bytes " . $offset . '-' . ($filesize - 1) . '/' . $filesize);
         if ($_SERVER['REQUEST_METHOD'] != 'HEAD') {
@@ -97,16 +97,16 @@ function serve_file($transcodeIncomplete = false, $cache_file, $format, $ts, $es
     exit();
 }
 
-function send_file_headers($format,$ts,$partial) {
-    $type = $format == "mp3" ? "mpeg" : "flac";
+function send_file_headers($format,$dt_est,$partial) {
+    $type = $format;
     if ($partial) {
         http_response_code(206);
         header("Content-Type: audio/$type");
         header('Accept-Ranges: bytes');
     } else {
         header('Content-Description: File Transfer');
-        header("Content-Type: application/$type");
-        header('Content-Disposition: attachment; filename="WMFO-Archive-' . strftime("%Y-%m-%d_%H.$format", $ts) . '"');
+        header("Content-Type: audio/$type");
+        header('Content-Disposition: attachment; filename="WMFO-Archive-' . $dt_est->format("Y-m-d_H.") . "$format\"");
         header('Expires: 0');
         header('Accept-Ranges: bytes');
         header('Cache-Control: must-revalidate');
@@ -114,10 +114,10 @@ function send_file_headers($format,$ts,$partial) {
     }
 }
 
-function mult_file_size($format,$ts,$length) {
+function mult_file_size($format,$dt,$length) {
 	$size = 0;
 	for ($i = 0; $i < $length ; $i++) {
-		$fn = strftime($format,$ts + $i*3600);
+		$fn = $dt->add(new DateInterval("PT" . $i . "H"))->format($format);
 		if (file_exists('./archives/' . $fn)){
 			$size += filesize('./archives/' . $fn);
 		}
@@ -125,11 +125,12 @@ function mult_file_size($format,$ts,$length) {
 	return $size;
 }
 
-function generate_filenames($format,$ts,$length) {
+function generate_filenames($format,$dt,$length) {
 	$filenames = '';
 	
 	for ($i = 0; $i < $length ; $i++) {
-		$fn = strftime($format,$ts + $i*3600);
+		//apparently this is the santione way to add with PHP dt ?XD
+		$fn = $dt->add(new DateInterval("PT" . $i . "H"))->format($format);
 		if (!file_exists('./archives/' . $fn)){
 			return false;
 		}
@@ -141,11 +142,12 @@ function generate_filenames($format,$ts,$length) {
 function sanity_check($cache_file, $filesize_total, $format) {
 	$cache_size = filesize($cache_file);
 	$ratio = $filesize_total / $cache_size;
-	if ($format == "mp3") {
-		if ($ratio > 12.01) {
-		    error_log("Failed sanity check: $cache_file has original $filesize_total and converted $cache_size with ratio $ratio");
-			return false;
-		}
+	if ($format == "mp3" && $ratio > 12.01) {
+		error_log("Failed sanity check: $cache_file has original $filesize_total and converted $cache_size with ratio $ratio");
+		return false;
+	} else if ($format == "m4a" && $ratio > 1.1) {
+		error_log("Failed m4a sanity: ratio: $cache_file has $ratio, filesize_total: $filesize_total, cache_size: $cache_size");
+		return false;
 	}
 	return true;	
 }
@@ -167,43 +169,49 @@ $format = isset($_GET['format']) ? $_GET['format'] : 'mp3';
 
 if ($length > 5)
 	usage("lengths greater than 5 not supported. Please concatenate files yourself.");
+date_default_timezone_set('America/New_York');
 
-$ts = strtotime($date);
+$dt_est = new DateTimeImmutable($date);
+$dt_utc = $dt_est->setTimeZone(new DateTimeZone("UTC"));
 
-$mp3filenames = generate_filenames("%Y-%m-%d-%H.mp3",$ts,$length);
+// first check for m4a compressed files
+$filenames = generate_filenames("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 
-if ($mp3filenames !== false) {
+$originalFilesize = 0;
+
+if ($filenames !== false) {
 	//concatenate MP3s
-	send_file_headers(".mp3",$ts,false);
+	$originalFilesize = mult_file_size("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 
-	header('Content-Length: ' . mult_file_size("%Y-%m-%d-%H.mp3",$ts,$length));
+	if ($length == 1) {
+		send_file_headers("m4a",$dt_est,false);
+		header('Content-Length: ' . $originalFilesize);
+		passthru("/bin/cat $filenames");
+		exit();
+	}
+	$format = "m4a";	
+} else {
+	//use new fancy transcode method
+	if (!in_array($format,$formats))
+	    usage("format not supported");
+	// now try s16 files	
+	$filenames = generate_filenames("Y-m-d_H\U.\s16",$dt_utc,$length);
 	
-	passthru("/bin/cat $mp3filenames");
-	exit();
-
+	if (!$filenames) {
+	    http_response_code(404);
+	    die("<h1>Not found</h1>
+	    <p>The requested file is not in this archive.<p>
+	    <p>This is usually caused by requesting a file:</p><ol>
+	    <li>in the future.</li>
+	    <li>from before 1/17/2016</li>
+	    <li>from during a power outage</li></ol>
+	    <p>Contact team ops if you have any questions.</p>
+	    <p>PS: this error is caused if any of the files requested are unavailable.");
+	}
+	$originalFilesize = mult_file_size("Y-m-d_H\U.\s16",$dt_utc,$length);
 }
-//use new fancy transcode method
-if (!in_array($format,$formats))
-    usage("format not supported");
-
-$filenames = generate_filenames("%Y-%m-%d_%H.s16",$ts,$length);
-
-if (!$filenames) {
-    http_response_code(404);
-    die("<h1>Not found</h1>
-    <p>The requested file is not in this archive.<p>
-    <p>This is usually caused by requesting a file:</p><ol>
-    <li>in the future.</li>
-    <li>from before 1/17/2016</li>
-    <li>from during a power outage</li></ol>
-    <p>Contact team ops if you have any questions.</p>
-    <p>PS: this error is caused if any of the files requested are unavailable.");
-}
-
-$cache_file = './cache/' . strftime("%Y-%m-%d_%H.$length.$format",$ts);
-
-$originalFilesize = mult_file_size("%Y-%m-%d_%H.s16",$ts,$length);
 $estimatedFilesize = estimate_content_length($originalFilesize,$format);
+$cache_file = './cache/' . $dt_utc->format("Y-m-d_H\U"). ".$length.$format";
 
 //check whether .done file exists (indicates completed transcode for this time & duration)
 clearstatcache();
@@ -212,7 +220,7 @@ if (file_exists($cache_file . ".done")) {
     // e.g. if someone tried to download the archive mid way through a show, the result would be shorter
     if (sanity_check($cache_file,$originalFilesize,$format)) {
 
-        serve_file(false,$cache_file,$format,$ts,$estimatedFilesize);
+        serve_file(false,$cache_file,$format,$dt_est,$estimatedFilesize);
         exit();
     } else {
         unlink($cache_file);
@@ -220,6 +228,7 @@ if (file_exists($cache_file . ".done")) {
     }
 }
 
+atomic:
 //atomic file locking to avoid all hell breaking loose
 $cache_file_existed = FALSE;
 $f = @fopen($cache_file,'x');
@@ -232,38 +241,33 @@ if ($f === FALSE) { //fopen 'x' mode returns FALSE if file exists
 if ($cache_file_existed)
 {
     //conversion is in progress
-    clearstatcache();
-    $filemtime = filemtime($cache_file);
-    $time_delta = time() - $filemtime;
-    $mp3_mtime_error = ($time_delta > 600) && $format == "mp3";
-    $flac_mtime_error = ($time_delta  > 1200) && $format == "flac";
-    // we should probably have a better way of doing this that checks for convert process
-    if ($mp3_mtime_error || $flac_mtime_error) {
+    //error_log("pgrep convert.sh.*$cache_file\"");
+	//error_log("pgrep -xf \"/bin/bash ./convert.sh $filenames $format $cache_file\"");
+    $pid = exec("pgrep -xf \"/bin/bash ./convert.sh $filenames $format $cache_file\"", $pida, $code);
+    //error_log("pid is: ${pida[0]} and int is: $code");
+    if ($code == 1) {
         //stale cache file (probably transcode interrupted)
-        //experimentally this should never exceed 0 on an active transcode for mp3 but not flac
-        $currentFilesize = filesize($cache_file);
-        $doneExists = file_exists($cache_file . ".done") ? "yes" : "no";
-        error_log("$cache_file determined to be stale (> 10 secs, no .done file). Caused by crash or bug. Time delta = $time_delta, filemtime = $filemtime, currentFilesize = $currentFilesize, doneExists = $doneExists");
+        //not sure why pgrep isn't cooperating with regexes
+        error_log("$cache_file determined to be stale. Something broke.");
+        //die();
         unlink($cache_file);
+        goto atomic;
     } else {
-        if ($format == "flac") {
+        if ($format == "flac" || $format == "m4a") {
             $percent = round(filesize($cache_file) * $length * 100 / 419846856);
-            die("<p>The server is hard at work converting your archive into FLAC. Please wait for this to complete and refresh the page to download the file.</p><p>The conversion is roughly $percent % complete.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/d/msg/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p>");
+            die("<html><head><meta http-equiv=\"refresh\" content=\"5\"></head><body><p>The server is hard at work converting your archive into FLAC. The page will refresh periodically to update progress.</p><p>The conversion is roughly $percent % complete.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/d/msg/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p></body></html>");
         }
 
-        serve_file(true, $cache_file, $format, $ts, $estimatedFilesize);
+        serve_file(true, $cache_file, $format, $dt_est, $estimatedFilesize);
         exit();
     }
 }
-//start new conversion
-//This was really annoying to get to happen async. Not sure why. This appears to work
-// (I haven't yet tried killing apache to see if it stops the conversion but that's supposedly
-// what setsid should help with).
-
+// start new conversion
+//	This was really annoying to get to happen async -- something to do with the output rdirection. This works now.
 exec("setsid ./convert.sh \"$filenames\" $format $cache_file >/dev/null 2>/dev/null &");
-if ($format == "flac") {
-    die("<p>We've begun converting your file to FLAC. This takes a minute or so per hour of archive. Refresh the page to view conversion status; the file will download if it's done converting.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/forum/#!topic/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p>");
+if ($format == "flac" || $format == "m4a") {
+    die("<html><head><meta http-equiv=\"refresh\" content=\"5\"></head><body><p>We've begun converting your file to '$format'. This takes a minute or so per hour of archive. Hang tight and this page will refresh with a progress update.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/forum/#!topic/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p></body></html>");
 }
 
 //serve conversion as it rolls out
-serve_file(true,$cache_file,$format,$ts,$estimatedFilesize);
+serve_file(true,$cache_file,$format,$dt_est,$estimatedFilesize);

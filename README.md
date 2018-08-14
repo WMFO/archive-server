@@ -1,19 +1,25 @@
 # WMFO Archive Serving System
 
-Copyright Nicholas Andre, 5/22/2016
+Copyright Nicholas Andre
 
 This is an on-demand transcoder with cache. Requests are served by generating a separate and dissociated transcode process. The script uses a simple file flag in the cache directory (the .done files) to identify whether the transcode was successful.
 
-It has two modes of transmission. If the transcode is .done, it simply `cat all-the files` and sends it with passthru(). In this case, we send the file size header.
-
-If the .done file is not present, it reads the file in chunks, as available, until it sees that the .done file is created.
+It has two modes of transmission. If the transcode is .done, it simply `cat all-the files` and sends it with passthru(). In this case, we send the file size header. If the .done file is not present, it reads the file in chunks, as available, until it sees that the .done file is created. We also can send partial files for browser streaming plugins.
 
 Requires two mounts 
 
-* ./archives/ - the entirety of .s16 files and other archive files like .mp3s or (eventually) .aac files
+* ./archives/ - the entirety of .s16 files and other .aac archive files
 * ./cache/ - a scratch directory to store transcodes. Recommend it be wiped periodically to save space (14-30 days or so).
 
 ## Versions
+
+### 2.0 (8/13/2018)
+
+- Removed support for direct MP3 archive files as ours were transcoded to AAC.
+- Added support for AAC (m4a container) files (requires ffmpeg dependency). AAC files will download first if present.
+- Switched to UTC timestamps with conversion from ET in script (filenames now end in U to differentiate).
+- FLAC and AAC still block on download; page now refreshes periodically to display progress and start download.
+- We now rely on presence of conversion process (convert.sh) via pgrep to determine if the transcode is stale/was killed prematurely
 
 ### 1.4 (3/16/2017)
 
