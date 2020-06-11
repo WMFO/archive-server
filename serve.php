@@ -4,12 +4,14 @@ global $formats;
 function usage($m) {
 	http_response_code(400);
 	echo "<h1>Error 400 - Bad Request</h1>";
+	echo "<p>Details: $m</p><hr>";
 	echo "<p>WMFO's multi-format on-the-fly archive serving and transcoding script, written by Nick Andre in Summer of 2016.</p><p>Usage:</p><pre>http://";
 	echo $_SERVER['SERVER_NAME'] . "/serve.php?date=YYYY-MM-DDTHH:MM:SS&length=HOURS&format=FORMAT</pre>";
 	echo "<p>Available formats:</p><pre>";
 	var_dump($GLOBALS['formats']);
 	echo "</pre>";
-	die("<p>Specific error info: " . $m . "</p>");
+	echo "<p>Archives older than approximately 1 year are compressed to AAC at 128 kbps and will be served in that format.</p>";
+	die("<p>Please try again.</p>");
 }
 
 function serve_incomplete($name,$seekPos = false) {
@@ -175,6 +177,7 @@ if ($length > 5)
 	usage("lengths greater than 5 not supported. Please concatenate files yourself.");
 date_default_timezone_set('America/New_York');
 
+// We store files in UTC due to the DST shenanigans which result in differing-length files when the clocks shuffle.
 $dt_est = new DateTimeImmutable($date);
 $dt_utc = $dt_est->setTimeZone(new DateTimeZone("UTC"));
 
@@ -184,21 +187,24 @@ $filenames = generate_filenames("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 $originalFilesize = 0;
 
 if ($filenames !== false) {
-	//concatenate MP3s
+	// This means we found M4A files; serve them and concatenate M4As
 	$originalFilesize = mult_file_size("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 
 	if ($length == 1) {
+		// If we have a request for a single hour, we just send the whole file
 		send_file_headers("m4a",$dt_est,false);
 		header('Content-Length: ' . $originalFilesize);
 		passthru("/bin/cat $filenames");
 		exit();
 	}
+	// This overrides the original format preference.
+	// TODO: swap this to send s16 if available.
 	$format = "m4a";	
 } else {
-	//use new fancy transcode method
+	// Check to see if we support the requested format
 	if (!in_array($format,$formats))
 	    usage("format not supported");
-	// now try s16 files	
+	// check for s16 files
 	$filenames = generate_filenames("Y-m-d_H\U.\s16",$dt_utc,$length);
 	
 	if (!$filenames) {
@@ -214,6 +220,7 @@ if ($filenames !== false) {
 	}
 	$originalFilesize = mult_file_size("Y-m-d_H\U.\s16",$dt_utc,$length);
 }
+// If we haven't finished transcoding the file, we need to bulshit a value for the output size
 $estimatedFilesize = estimate_content_length($originalFilesize,$format);
 $cache_file = './cache/' . $dt_utc->format("Y-m-d_H\U"). ".$length.$format";
 
@@ -223,17 +230,21 @@ if (file_exists($cache_file . ".done")) {
     // verify whether file size is appropriate
     // e.g. if someone tried to download the archive mid way through a show, the result would be shorter
     if (sanity_check($cache_file,$originalFilesize,$format)) {
-
+	// In this case, we have a .done file which we write when transcode finishes
         serve_file(false,$cache_file,$format,$dt_est,$estimatedFilesize);
         exit();
     } else {
+	// We get here when the ratio between the s16 file and the compressed result is insufficient.
+	// The most likely scenario is that someone requested an archive before the file was totally written to disk (i.e. before the show ended)
+	// This doesn't happen when we get killed before the transcode is complete, which would result in no .done file
         unlink($cache_file);
         unlink($cache_file . ".done");
     }
 }
 
 atomic:
-//atomic file locking to avoid all hell breaking loose
+// atomic file locking to avoid all hell breaking loose
+// This ensures that only one transcode happens at a time, and all other requests are served the same file
 $cache_file_existed = FALSE;
 $f = @fopen($cache_file,'x');
 if ($f === FALSE) { //fopen 'x' mode returns FALSE if file exists
@@ -244,24 +255,21 @@ if ($f === FALSE) { //fopen 'x' mode returns FALSE if file exists
 
 if ($cache_file_existed)
 {
-    //conversion is in progress
-    //error_log("pgrep convert.sh.*$cache_file\"");
-	//error_log("pgrep -xf \"/bin/bash ./convert.sh $filenames $format $cache_file\"");
+    // If everything is going to plan, this means we should find a conversion script running. We check:
     $pid = exec("pgrep -xf \"/bin/bash ./convert.sh $filenames $format $cache_file\"", $pida, $code);
-    //error_log("pid is: ${pida[0]} and int is: $code");
     if ($code == 1) {
-        //stale cache file (probably transcode interrupted)
-        //not sure why pgrep isn't cooperating with regexes
+        // We didn't find a transcode process for this file. That means it died. We now remove the file and restart.
         error_log("$cache_file determined to be stale. Something broke.");
-        //die();
         unlink($cache_file);
         goto atomic;
     } else {
+	// Transcode appears to be transcoding away in the background, we now continue:
         if ($format == "flac" || $format == "m4a") {
+	    // Try as I might, I couldn't get the m4a or flac containers to work properly by serving incrementally. We use this clever stall page which refreshes itself.
             $percent = round(filesize($cache_file) * $length * 100 / 419846856);
             die("<html><head><meta http-equiv=\"refresh\" content=\"5\"></head><body><p>The server is hard at work converting your archive into FLAC. The page will refresh periodically to update progress.</p><p>The conversion is roughly $percent % complete.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/d/msg/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p></body></html>");
         }
-
+	// If we got here, we are all set to serve the partial file. This is supported only for mp3 at present.
         serve_file(true, $cache_file, $format, $dt_est, $estimatedFilesize);
         exit();
     }
@@ -270,8 +278,9 @@ if ($cache_file_existed)
 //	This was really annoying to get to happen async -- something to do with the output rdirection. This works now.
 exec("setsid ./convert.sh \"$filenames\" $format $cache_file >/dev/null 2>/dev/null &");
 if ($format == "flac" || $format == "m4a") {
+    // Same as above; the file will be corrupt on download. We stall here and refresh. Next time we will hit above and provide perentage.
     die("<html><head><meta http-equiv=\"refresh\" content=\"5\"></head><body><p>We've begun converting your file to '$format'. This takes a minute or so per hour of archive. Hang tight and this page will refresh with a progress update.</p><p>For an in-depth discussion of why this happens, see <a href='https://groups.google.com/forum/#!topic/wmfo-ops/HJN-B0G6GpE/u5yFT47dBQAJ'>this ops list post.</a></p></body></html>");
 }
 
-//serve conversion as it rolls out
+// The newly-begun-transcoding file is now going to be served. This function will wait for the file to appear if there's a lag.
 serve_file(true,$cache_file,$format,$dt_est,$estimatedFilesize);
