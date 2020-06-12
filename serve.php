@@ -134,6 +134,7 @@ function mult_file_size($format,$dt,$length) {
 function generate_filenames($format,$dt,$length) {
 	$filenames = '';
 	
+	//TODO: we want to move the m4a files to a separate share
 	for ($i = 0; $i < $length ; $i++) {
 		//apparently this is the santione way to add with PHP dt ?XD
 		$fn = $dt->add(new DateInterval("PT" . $i . "H"))->format($format);
@@ -181,12 +182,21 @@ date_default_timezone_set('America/New_York');
 $dt_est = new DateTimeImmutable($date);
 $dt_utc = $dt_est->setTimeZone(new DateTimeZone("UTC"));
 
-// first check for m4a compressed files
-$filenames = generate_filenames("Y-m-d_H\U.\m4\a",$dt_utc,$length);
+// check for s16 files
+$filenames = generate_filenames("Y-m-d_H\U.\s16",$dt_utc,$length);
 
 $originalFilesize = 0;
 
 if ($filenames !== false) {
+	// If we find the s16 filenames, we serve those since they are higher quality.
+	// Check to see if we support the requested format
+	if (!in_array($format,$formats))
+	    usage("format not supported");
+	$originalFilesize = mult_file_size("Y-m-d_H\U.\s16",$dt_utc,$length);
+
+} else {
+	// first check for m4a compressed files
+	$filenames = generate_filenames("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 	// This means we found M4A files; serve them and concatenate M4As
 	$originalFilesize = mult_file_size("Y-m-d_H\U.\m4\a",$dt_utc,$length);
 
@@ -197,16 +207,6 @@ if ($filenames !== false) {
 		passthru("/bin/cat $filenames");
 		exit();
 	}
-	// This overrides the original format preference.
-	// TODO: swap this to send s16 if available.
-	$format = "m4a";	
-} else {
-	// Check to see if we support the requested format
-	if (!in_array($format,$formats))
-	    usage("format not supported");
-	// check for s16 files
-	$filenames = generate_filenames("Y-m-d_H\U.\s16",$dt_utc,$length);
-	
 	if (!$filenames) {
 	    http_response_code(404);
 	    die("<h1>Not found</h1>
@@ -218,7 +218,8 @@ if ($filenames !== false) {
 	    <p>Contact team ops if you have any questions.</p>
 	    <p>PS: this error is caused if any of the files requested are unavailable.");
 	}
-	$originalFilesize = mult_file_size("Y-m-d_H\U.\s16",$dt_utc,$length);
+	// Since we don't have s16, we have to override the format preference to m4a only
+	$format = "m4a";	
 }
 // If we haven't finished transcoding the file, we need to bulshit a value for the output size
 $estimatedFilesize = estimate_content_length($originalFilesize,$format);
