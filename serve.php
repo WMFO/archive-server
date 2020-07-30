@@ -45,18 +45,25 @@ function serve_partial($filename, $offset, $filesize) {
     return(true);
 }
 
+
 function serve_file($transcodeIncomplete = false, $cache_file, $format, $dt_est, $estimatedFilesize) {
     $measuredFilesize = filesize($cache_file);
-    $offset = 0;
+    $offset = false;
+    $end = false;
+    $length = false;
+    
     if (isset($_SERVER['HTTP_RANGE'])) {
         // get byte bounds of range header
         preg_match('/bytes=(\d+)-(\d+)?/', $_SERVER['HTTP_RANGE'], $matches);
 
         $offset = intval($matches[1]);
-        //$length = isset($matches[2]) ? intval($matches[2]) - $offset : $finalFileSize - $offset - 1;
+	if (isset($matches[2])) {
+		$end = intval($matches[2]);
+        	$length = $end - $offset;
+	}
     }
 
-    if ($offset == 0) {
+    if ($offset === false) {
         //whole file
         send_file_headers($format, $dt_est, false);
 
@@ -75,10 +82,15 @@ function serve_file($transcodeIncomplete = false, $cache_file, $format, $dt_est,
     } else {
         //partial file
         $filesize = $transcodeIncomplete ? $estimatedFilesize : $measuredFilesize;
+	$end_header = $filesize - 1;
         $netSize = $filesize - $offset;
+	if ($end !== false){
+		$end_header = $end;
+		$netSize = $end - $offset + 1;
+	}
         send_file_headers($format, $dt_est, true);
-        header('Content-Length: ' . $netSize);
-        header("Content-Range: bytes " . $offset . '-' . ($filesize - 1) . '/' . $filesize);
+	header('Content-Length: ' . $netSize);
+        header("Content-Range: bytes " . $offset . '-' . $end_header . '/' . $filesize);
         if ($_SERVER['REQUEST_METHOD'] != 'HEAD') {
             if ($transcodeIncomplete) {
                 if ($offset > $estimatedFilesize)
